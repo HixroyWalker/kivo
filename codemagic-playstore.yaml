@@ -1,0 +1,116 @@
+# Codemagic Workflow for Google Play Store Deployment
+# Builds and deploys the Flutter app to Google Play Store.
+# See CODEMAGIC_SETUP.md for full setup instructions.
+
+workflows:
+  playstore-internal:
+    name: KiVo Global - Play Store Internal Test
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      android_signing:
+        - kivo_key
+      groups:
+        - playstore_credentials
+      vars:
+        PACKAGE_NAME: "com.kivo.global"
+        RELEASE_TRACK: "internal"
+        AAB_PATH: "build/app/outputs/bundle/release/app-release.aab"
+    triggering:
+      events:
+        - push
+      branch:
+        patterns:
+          - pattern: 'develop'
+            include: true
+    scripts:
+      - name: Setup Flutter
+        script: |
+          flutter config --no-analytics
+          flutter pub get
+
+      - name: Run Tests
+        script: |
+          flutter test --no-pub || true
+
+      - name: Analyze Code
+        script: |
+          flutter analyze || true
+
+      - name: Build Android App Bundle
+        script: |
+          flutter build appbundle \
+            --target-platform android-arm,android-arm64,android-x86,android-x86-64 \
+            --release \
+            --verbose
+
+      - name: Upload to Play Store Internal Track
+        script: |
+          pip3 install google-auth-oauthlib google-auth-httplib2 google-api-python-client
+          echo "$PLAYSTORE_SERVICE_ACCOUNT_KEY" > /tmp/playstore_key.json
+          python3 scripts/playstore_upload.py
+
+    artifacts:
+      - build/app/outputs/bundle/release/app-release.aab
+    publishing:
+      email:
+        recipients:
+          - $DEVELOPER_EMAIL
+        notify_on_build_start: true
+        notify_on_completion: true
+
+  playstore-release:
+    name: KiVo Global - Play Store Production Release
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      android_signing:
+        - kivo_key
+      groups:
+        - playstore_credentials
+      vars:
+        PACKAGE_NAME: "com.kivo.global"
+        RELEASE_TRACK: "production"
+        AAB_PATH: "build/app/outputs/bundle/release/app-release.aab"
+    triggering:
+      events:
+        - tag
+      tag:
+        patterns:
+          - pattern: 'v\d+\.\d+\.\d+'
+            include: true
+    scripts:
+      - name: Setup Flutter
+        script: |
+          flutter config --no-analytics
+          flutter pub get
+
+      - name: Run Tests
+        script: |
+          flutter test --no-pub
+
+      - name: Analyze Code
+        script: |
+          flutter analyze
+
+      - name: Build Android App Bundle
+        script: |
+          flutter build appbundle \
+            --target-platform android-arm,android-arm64,android-x86,android-x86-64 \
+            --release \
+            --verbose
+
+      - name: Upload to Play Store Production Track
+        script: |
+          pip3 install google-auth-oauthlib google-auth-httplib2 google-api-python-client
+          echo "$PLAYSTORE_SERVICE_ACCOUNT_KEY" > /tmp/playstore_key.json
+          python3 scripts/playstore_upload.py
+
+    artifacts:
+      - build/app/outputs/bundle/release/app-release.aab
+    publishing:
+      email:
+        recipients:
+          - $DEVELOPER_EMAIL
+        notify_on_build_start: true
+        notify_on_completion: true
