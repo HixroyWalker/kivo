@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// KiVo Gov-Verify
-// Cross-references TRN data with public records for verification.
+"""KiVo Gov-Verify
+Cross-references TRN data with public records for verification.
+"""
 
 const https = require('https');
 const { URL } = require('url');

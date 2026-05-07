@@ -1,6 +1,5 @@
 # Codemagic Workflow for Google Play Store Deployment
-# Builds and deploys the Flutter app to Google Play Store.
-# See CODEMAGIC_SETUP.md for full setup instructions.
+# This workflow builds and deploys the Flutter app to Google Play Store
 
 workflows:
   playstore-internal:
@@ -15,7 +14,7 @@ workflows:
       vars:
         PACKAGE_NAME: "com.kivo.global"
         RELEASE_TRACK: "internal"
-        AAB_PATH: "build/app/outputs/bundle/release/app-release.aab"
+        APP_NAME: "KiVo Global"
     triggering:
       events:
         - push
@@ -28,28 +27,112 @@ workflows:
         script: |
           flutter config --no-analytics
           flutter pub get
-
+      
       - name: Run Tests
         script: |
           flutter test --no-pub || true
-
+      
       - name: Analyze Code
         script: |
           flutter analyze || true
-
+      
       - name: Build Android App Bundle
         script: |
           flutter build appbundle \
             --target-platform android-arm,android-arm64,android-x86,android-x86-64 \
             --release \
             --verbose
-
+      
       - name: Upload to Play Store Internal Track
         script: |
+          # Install Python dependencies
           pip3 install google-auth-oauthlib google-auth-httplib2 google-api-python-client
+          
+          # Save service account key
           echo "$PLAYSTORE_SERVICE_ACCOUNT_KEY" > /tmp/playstore_key.json
-          python3 scripts/playstore_upload.py
+          
+          # Create upload script
+          python3 << 'EOF'
+import os
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
+# Load service account credentials
+with open('/tmp/playstore_key.json') as f:
+    sa_info = json.load(f)
+
+credentials = service_account.Credentials.from_service_account_info(
+    sa_info,
+    scopes=['https://www.googleapis.com/auth/androidpublisher']
+)
+
+# Create Play API client
+service = build('androidpublisher', 'v3', credentials=credentials)
+
+package_name = os.getenv('PACKAGE_NAME')
+release_track = os.getenv('RELEASE_TRACK', 'internal')
+aab_path = 'build/app/outputs/bundle/release/app-release.aab'
+
+print(f'Uploading {aab_path} to {release_track} track...')
+
+try:
+    # Create edit
+    edit_request = service.edits().insert(
+        body={},
+        packageName=package_name
+    )
+    edit_result = edit_request.execute()
+    edit_id = edit_result['id']
+    print(f'Created edit: {edit_id}')
+    
+    # Upload bundle
+    print(f'Uploading bundle...')
+    media = MediaFileUpload(aab_path, mimetype='application/octet-stream')
+    upload_request = service.edits().bundles().upload(
+        editId=edit_id,
+        packageName=package_name,
+        media_body=media
+    )
+    upload_result = upload_request.execute()
+    version_code = upload_result['versionCode']
+    print(f'Bundle uploaded with version code: {version_code}')
+    
+    # Assign to track
+    print(f'Assigning to {release_track} track...')
+    track_request = service.edits().tracks().update(
+        editId=edit_id,
+        track=release_track,
+        packageName=package_name,
+        body={
+            'releases': [{
+                'versionCodes': [version_code],
+                'status': 'completed',
+                'releaseNotes': [{
+                    'language': 'en-US',
+                    'text': 'Automated release from Codemagic'
+                }]
+            }]
+        }
+    )
+    track_result = track_request.execute()
+    print(f'Assigned to track: {track_result}')
+    
+    # Commit changes
+    print(f'Committing changes...')
+    commit_request = service.edits().commit(
+        editId=edit_id,
+        packageName=package_name
+    )
+    commit_request.execute()
+    print(f'Successfully published to {release_track} track!')
+    
+except Exception as e:
+    print(f'Error: {e}')
+    exit(1)
+EOF
+    
     artifacts:
       - build/app/outputs/bundle/release/app-release.aab
     publishing:
@@ -71,7 +154,7 @@ workflows:
       vars:
         PACKAGE_NAME: "com.kivo.global"
         RELEASE_TRACK: "production"
-        AAB_PATH: "build/app/outputs/bundle/release/app-release.aab"
+        APP_NAME: "KiVo Global"
     triggering:
       events:
         - tag
@@ -84,28 +167,119 @@ workflows:
         script: |
           flutter config --no-analytics
           flutter pub get
-
+      
       - name: Run Tests
         script: |
           flutter test --no-pub
-
+      
       - name: Analyze Code
         script: |
           flutter analyze
-
+      
+      - name: Extract Version from Git Tag
+        script: |
+          # Extract version from tag (e.g., v1.0.0 -> 1.0.0)
+          VERSION=${CODEMAGIC_GIT_TAG#v}
+          echo "Version: $VERSION"
+          echo "VERSION=$VERSION" >> /tmp/build.env
+      
       - name: Build Android App Bundle
         script: |
           flutter build appbundle \
             --target-platform android-arm,android-arm64,android-x86,android-x86-64 \
             --release \
             --verbose
-
+      
       - name: Upload to Play Store Production Track
         script: |
+          # Install Python dependencies
           pip3 install google-auth-oauthlib google-auth-httplib2 google-api-python-client
+          
+          # Save service account key
           echo "$PLAYSTORE_SERVICE_ACCOUNT_KEY" > /tmp/playstore_key.json
-          python3 scripts/playstore_upload.py
+          
+          # Create upload script
+          python3 << 'EOF'
+import os
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
+# Load service account credentials
+with open('/tmp/playstore_key.json') as f:
+    sa_info = json.load(f)
+
+credentials = service_account.Credentials.from_service_account_info(
+    sa_info,
+    scopes=['https://www.googleapis.com/auth/androidpublisher']
+)
+
+# Create Play API client
+service = build('androidpublisher', 'v3', credentials=credentials)
+
+package_name = os.getenv('PACKAGE_NAME')
+release_track = os.getenv('RELEASE_TRACK', 'production')
+aab_path = 'build/app/outputs/bundle/release/app-release.aab'
+
+print(f'Uploading {aab_path} to {release_track} track...')
+
+try:
+    # Create edit
+    edit_request = service.edits().insert(
+        body={},
+        packageName=package_name
+    )
+    edit_result = edit_request.execute()
+    edit_id = edit_result['id']
+    print(f'Created edit: {edit_id}')
+    
+    # Upload bundle
+    print(f'Uploading bundle...')
+    media = MediaFileUpload(aab_path, mimetype='application/octet-stream')
+    upload_request = service.edits().bundles().upload(
+        editId=edit_id,
+        packageName=package_name,
+        media_body=media
+    )
+    upload_result = upload_request.execute()
+    version_code = upload_result['versionCode']
+    print(f'Bundle uploaded with version code: {version_code}')
+    
+    # Assign to track
+    print(f'Assigning to {release_track} track...')
+    track_request = service.edits().tracks().update(
+        editId=edit_id,
+        track=release_track,
+        packageName=package_name,
+        body={
+            'releases': [{
+                'versionCodes': [version_code],
+                'status': 'completed',
+                'releaseNotes': [{
+                    'language': 'en-US',
+                    'text': 'Production release from Codemagic'
+                }]
+            }]
+        }
+    )
+    track_result = track_request.execute()
+    print(f'Assigned to track: {track_result}')
+    
+    # Commit changes
+    print(f'Committing changes...')
+    commit_request = service.edits().commit(
+        editId=edit_id,
+        packageName=package_name
+    )
+    commit_request.execute()
+    print(f'Successfully published to {release_track} track!')
+    
+except Exception as e:
+    print(f'Error: {e}')
+    exit(1)
+EOF
+    
     artifacts:
       - build/app/outputs/bundle/release/app-release.aab
     publishing:
